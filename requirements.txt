@@ -1,0 +1,18 @@
+# video-dubbing-app-v3 — FREE, key-free dependencies only.
+# Install:  python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
+# Requires ffmpeg + ffprobe on PATH (system packages, not pip).
+# NOTE: edge-tts needs a normal (non-proxied) network; behind an
+# SSL-intercepting proxy its endpoint fails — use piper/gtts there.
+# ElevenLabs (optional, paid) needs NO extra pip package: the engine
+# (elevenlabs_engine.py) calls api.elevenlabs.io with stdlib urllib.
+
+faster-whisper==1.2.1
+av==13.1.0  # faster-whisper 1.2.1 needs the PyAV 13 API (newer av breaks it)
+edge-tts
+piper-tts==1.8.0  # offline TTS; tts.py consumes its chunk-iterator API
+gtts  # Google Translate TTS, 100+ languages, single voice per language
+deep-translator
+Pillow==13.0.0
+arabic-reshaper==3.0.1
+python-bidi==0.6.12
+streamlit
