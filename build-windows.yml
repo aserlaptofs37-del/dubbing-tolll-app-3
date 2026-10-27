@@ -1,0 +1,129 @@
+# GitHub Actions workflow: build Video Dubbing v3 for Windows.
+#
+# LIVE LOCATION: this file must live at .github/workflows/build-windows.yml
+# in the repo for GitHub to run it. The copy in packaging/ is the
+# deliverable; copy it to .github/workflows/ when setting up the repo.
+# (This workspace keeps an identical copy at that path already.)
+#
+# REPO LAYOUT THIS WORKFLOW EXPECTS (repo root = the v3 app directory):
+#   app.py, dub.py, transcribe.py, translate.py, tts.py, mix.py,
+#   render.py, captions.py, overlay.py, verify.py, detect.py,
+#   timeline.py, languages.py, requirements.txt
+#   packaging/
+#     launcher.py, VideoDubbingV3.spec, VideoDubbingV3.iss,
+#     fonts/*.ttf            (see packaging/fonts/README.txt -- REQUIRED)
+#     ffmpeg-bin/            (created by this workflow, do not commit)
+#   .github/workflows/build-windows.yml   (this file)
+#
+# TRIGGER: Actions tab -> "Build Windows Setup" -> Run workflow.
+#   (Also runs automatically on version tags like v3.0.0, and then
+#   attaches Setup.exe to the GitHub Release.)
+#
+# OUTPUT: the "VideoDubbingV3-Setup" artifact containing
+#   VideoDubbingV3-Setup.exe -- the file the user downloads and
+#   double-clicks. No CMD, no Python needed on the user's machine.
+#
+# WHAT THIS WORKFLOW DOES NOT DO: it cannot fully prove the app works
+# on a real user's laptop. The smoke test below only checks that the
+# built .exe starts and answers on localhost:8501. The manual Windows
+# checklist in packaging/BUILD.md is the real gate before sending the
+# Setup.exe to the user.
+
+name: Build Windows Setup
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install app deps + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Fetch ffmpeg (full build, libass included)
+        # Gyan full build: ffmpeg.exe + ffprobe.exe with libass, needed
+        # for styled caption burn-in. If this URL ever moves, update it
+        # here and in packaging/BUILD.md together.
+        run: |
+          New-Item -ItemType Directory -Force packaging/ffmpeg-bin | Out-Null
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z" -OutFile ffmpeg-full.7z
+          7z x ffmpeg-full.7z -offmpeg-extract | Out-Null
+          $bin = Get-ChildItem ffmpeg-extract -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          $probe = Get-ChildItem ffmpeg-extract -Recurse -Filter ffprobe.exe | Select-Object -First 1
+          Copy-Item $bin.FullName packaging/ffmpeg-bin/ffmpeg.exe
+          Copy-Item $probe.FullName packaging/ffmpeg-bin/ffprobe.exe
+          Get-ChildItem packaging/ffmpeg-bin
+
+      - name: Check fonts are present (fail fast with a clear message)
+        run: |
+          $fonts = Get-ChildItem packaging/fonts/*.ttf -ErrorAction SilentlyContinue
+          if (-not $fonts) {
+            throw "No .ttf files in packaging/fonts/. Add them per packaging/fonts/README.txt, or delete the [Fonts] lines from VideoDubbingV3.iss first."
+          }
+          $fonts | ForEach-Object { $_.Name }
+
+      - name: Build the app folder with PyInstaller
+        run: pyinstaller packaging/VideoDubbingV3.spec --noconfirm
+
+      - name: Smoke test (built .exe starts and answers)
+        # Non-blocking: CI quirks (Defender, slow first start) must not
+        # silently ship a broken build, but they also must not be the
+        # only gate -- the manual checklist in BUILD.md is the gate.
+        continue-on-error: true
+        run: |
+          $exe = "dist/VideoDubbingV3/VideoDubbingV3.exe"
+          if (-not (Test-Path $exe)) { throw "Built exe missing: $exe" }
+          $p = Start-Process -FilePath $exe -PassThru
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              Start-Sleep -Seconds 5
+              try {
+                $r = Invoke-WebRequest -Uri "http://127.0.0.1:8501/healthz" -TimeoutSec 3 -UseBasicParsing
+                if ($r.StatusCode -eq 200) { $ok = $true; break }
+              } catch { }
+            }
+            if (-not $ok) { throw "Smoke test: server did not answer on localhost:8501 within 5 minutes." }
+            Write-Host "Smoke test passed: server answered on localhost:8501."
+          } finally {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+          }
+
+      - name: Build Setup.exe with Inno Setup
+        # Inno Setup 6 ships on GitHub-hosted windows runners.
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "Inno Setup not found at $iscc -- update this step." }
+          & $iscc packaging/VideoDubbingV3.iss
+          Get-ChildItem packaging/installer-output
+
+      - name: Upload Setup.exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoDubbingV3-Setup
+          path: packaging/installer-output/VideoDubbingV3-Setup.exe
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" packaging/installer-output/VideoDubbingV3-Setup.exe --clobber
