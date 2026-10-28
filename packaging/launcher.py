@@ -59,6 +59,20 @@ def bundle_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def bundle_file(bdir, name):
+    """Resolve a bundled file/dir: PyInstaller 6 onedir puts data files
+    under _internal\\, while older layouts put them beside the exe.
+    Falls back to the beside-exe path so existing checks still fail
+    cleanly when the file is missing from both places."""
+    p = os.path.join(bdir, name)
+    if os.path.exists(p):
+        return p
+    p2 = os.path.join(bdir, "_internal", name)
+    if os.path.exists(p2):
+        return p2
+    return p
+
+
 def user_data_dir():
     base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
     path = os.path.join(base, APP_NAME)
@@ -107,7 +121,7 @@ def main():
     os.makedirs(work, exist_ok=True)
 
     # 1. Bundled ffmpeg/ffprobe first on PATH (fallback: system ffmpeg).
-    ffmpeg_bin = os.path.join(bdir, "ffmpeg")
+    ffmpeg_bin = bundle_file(bdir, "ffmpeg")
     if os.path.isdir(ffmpeg_bin):
         os.environ["PATH"] = ffmpeg_bin + os.pathsep + os.environ["PATH"]
 
@@ -149,7 +163,7 @@ def main():
         return 0
 
     # 6. Start Streamlit in a thread, open the browser once it answers.
-    app_py = os.path.join(bdir, "app.py")
+    app_py = bundle_file(bdir, "app.py")
     if not os.path.exists(app_py):
         print("ERROR: app.py is missing from the install folder: %s" % bdir)
         print("Reinstall Video Dubbing v3.")
