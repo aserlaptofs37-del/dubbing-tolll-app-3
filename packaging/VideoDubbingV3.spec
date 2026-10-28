@@ -24,6 +24,8 @@
 import glob
 import os
 
+from PyInstaller.utils.hooks import collect_all
+
 SPEC_DIR = os.path.dirname(os.path.abspath(SPEC))
 SRC = os.path.dirname(SPEC_DIR)  # repo root = v3 app directory
 
