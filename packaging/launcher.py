@@ -175,7 +175,12 @@ def main():
                     "--server.port", str(PORT),
                     "--server.address", HOST,
                     "--server.headless", "true",
-                    "--browser.gatherUsageStats", "false"]
+                    "--browser.gatherUsageStats", "false",
+                    # Frozen (PyInstaller) builds resolve
+                    # global.developmentMode as true, which Streamlit
+                    # refuses to combine with an explicit server.port
+                    # (the run #8 smoke-test crash). Force it off.
+                    "--global.developmentMode", "false"]
         stcli.main()
 
     thread = threading.Thread(target=run_server, daemon=True)
