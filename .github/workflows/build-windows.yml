@@ -84,14 +84,13 @@ jobs:
         run: pyinstaller packaging/VideoDubbingV3.spec --noconfirm
 
       - name: Smoke test (built .exe starts and answers)
-        # Non-blocking: CI quirks (Defender, slow first start) must not
-        # silently ship a broken build, but they also must not be the
-        # only gate -- the manual checklist in BUILD.md is the gate.
-        continue-on-error: true
+        # Hard gate: a build whose server does not answer must not ship.
         run: |
           $exe = "dist/VideoDubbingV3/VideoDubbingV3.exe"
           if (-not (Test-Path $exe)) { throw "Built exe missing: $exe" }
-          $p = Start-Process -FilePath $exe -PassThru
+          $outLog = "smoke-exe-out.log"
+          $errLog = "smoke-exe-err.log"
+          $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $outLog -RedirectStandardError $errLog
           try {
             $ok = $false
             for ($i = 0; $i -lt 60; $i++) {
@@ -101,7 +100,13 @@ jobs:
                 if ($r.StatusCode -eq 200) { $ok = $true; break }
               } catch { }
             }
-            if (-not $ok) { throw "Smoke test: server did not answer on localhost:8501 within 5 minutes." }
+            if (-not $ok) {
+              Write-Host "=== exe stdout ==="
+              if (Test-Path $outLog) { Get-Content $outLog -Tail 100 }
+              Write-Host "=== exe stderr ==="
+              if (Test-Path $errLog) { Get-Content $errLog -Tail 100 }
+              throw "Smoke test: server did not answer on localhost:8501 within 5 minutes."
+            }
             Write-Host "Smoke test passed: server answered on localhost:8501."
           } finally {
             if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
